@@ -1,0 +1,32 @@
+{
+  "profiles": {
+    "1v1": {
+      "description": "1.1 V standard-VT core devices",
+      "pdk_model": "/PDKS/TSMC40nm/models/spectre/toplevel.scs",
+      "corner": "top_tt",
+      "nmos_model": "nch",
+      "pmos_model": "pch",
+      "width_m": 1e-6,
+      "length_m": 40e-9,
+      "vgs_start_v": 0.0,
+      "vgs_stop_v": 1.1,
+      "vgs_step_v": 0.005,
+      "vds_v": [0.05, 0.55, 1.1],
+      "plot_gmid_max": 26.0
+    },
+    "2v5": {
+      "description": "2.5 V nominal-VT I/O devices",
+      "pdk_model": "/PDKS/TSMC40nm/models/spectre/toplevel.scs",
+      "corner": "top_tt",
+      "nmos_model": "nch_25",
+      "pmos_model": "pch_25",
+      "width_m": 1e-6,
+      "length_m": 270e-9,
+      "vgs_start_v": 0.0,
+      "vgs_stop_v": 2.5,
+      "vgs_step_v": 0.01,
+      "vds_v": [0.1, 1.25, 2.5],
+      "plot_gmid_max": 32.0
+    }
+  }
+}

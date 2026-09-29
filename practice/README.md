@@ -39,8 +39,8 @@ powershell -ExecutionPolicy Bypass -File .\practice\sky130\run_sky130_practice.p
 
 ## TSMC40 真实 PDK（远端 Spectre）
 
-TSMC40 的 `nch/pch` gm/ID 实践位于 `tsmc40_spectre/`。PDK 和生成的数据
-保留在 `IC_Server_Local:/home/userone/AAAIC/test_tb/gmid_tsmc40`，本地只保存
-可复用网表与运行器。
+TSMC40 的配置驱动 gm/ID 实践位于 `tsmc40_spectre/`，内置 1.1 V
+`nch/pch` 与 2.5 V `nch_25/pch_25` profile。PDK 和生成的数据保留在
+`IC_Server:/home/userone/AAAIC/test_tb/gmid_tsmc40`，本地只保存配置与运行器。
 
 详见 [`tsmc40_spectre/README.md`](tsmc40_spectre/README.md)。

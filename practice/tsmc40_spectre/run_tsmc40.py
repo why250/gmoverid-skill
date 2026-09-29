@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Run a TSMC40 Spectre gm/ID sweep and generate CSV/SVG/PNG artifacts.
+"""Run configurable TSMC40 Spectre gm/ID sweeps and generate artifacts.
 
-This script intentionally uses only the Python standard library.  The remote
-IC server has Spectre and gnuplot, but it does not need numpy or matplotlib.
+The runner uses only the Python standard library. Device families, dimensions,
+biases, model paths, and corners come from profiles.json and can be overridden
+from the command line without editing Python or Spectre source files.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+from dataclasses import dataclass, replace
 import json
 import math
 import re
@@ -16,28 +18,18 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 
 BASE_DIR = Path(__file__).resolve().parent
-NETLIST = BASE_DIR / "netlist" / "characterize.scs"
+DEFAULT_PROFILES = BASE_DIR / "profiles.json"
 DEFAULT_SPECTRE = Path("/opt/eda/cadence/SPECTRE251/bin/spectre")
 DEFAULT_GNUPLOT = Path("/opt/eda/cadence/DDI251/GENUS251/bin/gnuplot")
-PDK_MODEL = Path("/PDKS/TSMC40nm/models/spectre/toplevel.scs")
-CORNER = "top_tt"
-WIDTH_M = 1e-6
-LENGTH_M = 40e-9
-EXPECTED_POINTS = 221
-
-DEVICES = (
-    ("MN005", "nch", "nmos", 0.05),
-    ("MN055", "nch", "nmos", 0.55),
-    ("MN110", "nch", "nmos", 1.10),
-    ("MP005", "pch", "pmos", 0.05),
-    ("MP055", "pch", "pmos", 0.55),
-    ("MP110", "pch", "pmos", 1.10),
-)
+IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+PROFILE_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 RAW_FIELDS = ("ids", "gm", "gds", "cgg", "cgd", "cgs", "vth", "vdsat")
+SAVE_FIELDS = RAW_FIELDS + ("gmoverid", "self_gain")
 CSV_FIELDS = (
     "vgs_v",
     "vds_v",
@@ -54,6 +46,206 @@ CSV_FIELDS = (
     "ft_hz",
     "id_w_a_per_m",
 )
+
+
+@dataclass(frozen=True)
+class CharacterizationConfig:
+    profile: str
+    description: str
+    pdk_model: str
+    corner: str
+    nmos_model: str
+    pmos_model: str
+    width_m: float
+    length_m: float
+    vgs_start_v: float
+    vgs_stop_v: float
+    vgs_step_v: float
+    vds_v: tuple[float, ...]
+    plot_gmid_max: float
+
+    @property
+    def expected_points(self) -> int:
+        intervals = (self.vgs_stop_v - self.vgs_start_v) / self.vgs_step_v
+        rounded = round(intervals)
+        if not math.isclose(intervals, rounded, rel_tol=0.0, abs_tol=1e-9):
+            raise ValueError(
+                "VGS range must contain an integer number of steps: "
+                f"({self.vgs_stop_v} - {self.vgs_start_v}) / {self.vgs_step_v}"
+            )
+        return rounded + 1
+
+
+@dataclass(frozen=True)
+class DeviceSpec:
+    instance: str
+    model: str
+    polarity: str
+    vds_v: float
+
+
+def validate_config(config: CharacterizationConfig) -> None:
+    if not PROFILE_RE.fullmatch(config.profile):
+        raise ValueError(f"invalid profile: {config.profile!r}")
+    for label, value in (
+        ("corner", config.corner),
+        ("nmos_model", config.nmos_model),
+        ("pmos_model", config.pmos_model),
+    ):
+        if not IDENTIFIER_RE.fullmatch(value):
+            raise ValueError(f"invalid {label}: {value!r}")
+    if (
+        not re.fullmatch(r"/[A-Za-z0-9_./-]+", config.pdk_model)
+        or "//" in config.pdk_model
+        or any(part in (".", "..") for part in config.pdk_model.split("/"))
+    ):
+        raise ValueError(f"pdk_model must be absolute: {config.pdk_model}")
+    if config.width_m <= 0.0 or config.length_m <= 0.0:
+        raise ValueError("width_m and length_m must be positive")
+    if config.vgs_start_v < 0.0 or config.vgs_stop_v <= config.vgs_start_v:
+        raise ValueError("VGS stop must be greater than a non-negative start")
+    if config.vgs_step_v <= 0.0:
+        raise ValueError("vgs_step_v must be positive")
+    if not config.vds_v or len(set(config.vds_v)) != len(config.vds_v):
+        raise ValueError("vds_v must contain at least one unique bias")
+    if any(value <= 0.0 or value > config.vgs_stop_v for value in config.vds_v):
+        raise ValueError("each VDS bias must be positive and no greater than VGS stop")
+    if config.plot_gmid_max <= 2.0:
+        raise ValueError("plot_gmid_max must be greater than 2")
+    config.expected_points
+
+
+def load_profiles(path: Path) -> dict[str, CharacterizationConfig]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_profiles = payload.get("profiles")
+    if not isinstance(raw_profiles, dict) or not raw_profiles:
+        raise ValueError(f"profiles object is missing or empty in {path}")
+
+    profiles: dict[str, CharacterizationConfig] = {}
+    for name, raw in raw_profiles.items():
+        if not isinstance(raw, dict):
+            raise ValueError(f"profile {name!r} must be an object")
+        try:
+            config = CharacterizationConfig(
+                profile=name,
+                description=str(raw["description"]),
+                pdk_model=str(raw["pdk_model"]),
+                corner=str(raw["corner"]),
+                nmos_model=str(raw["nmos_model"]),
+                pmos_model=str(raw["pmos_model"]),
+                width_m=float(raw["width_m"]),
+                length_m=float(raw["length_m"]),
+                vgs_start_v=float(raw["vgs_start_v"]),
+                vgs_stop_v=float(raw["vgs_stop_v"]),
+                vgs_step_v=float(raw["vgs_step_v"]),
+                vds_v=tuple(float(value) for value in raw["vds_v"]),
+                plot_gmid_max=float(raw["plot_gmid_max"]),
+            )
+        except KeyError as exc:
+            raise ValueError(f"profile {name!r} is missing {exc.args[0]!r}") from exc
+        validate_config(config)
+        profiles[name] = config
+    return profiles
+
+
+def parse_vds(value: str) -> tuple[float, ...]:
+    try:
+        parsed = tuple(float(item.strip()) for item in value.split(",") if item.strip())
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("VDS must be comma-separated numbers") from exc
+    if not parsed:
+        raise argparse.ArgumentTypeError("VDS must contain at least one number")
+    return parsed
+
+
+def apply_overrides(
+    config: CharacterizationConfig, args: argparse.Namespace
+) -> CharacterizationConfig:
+    updates: dict[str, Any] = {}
+    for name in (
+        "corner",
+        "nmos_model",
+        "pmos_model",
+        "vgs_start_v",
+        "vgs_stop_v",
+        "vgs_step_v",
+        "plot_gmid_max",
+    ):
+        value = getattr(args, name)
+        if value is not None:
+            updates[name] = value
+    if args.pdk_model is not None:
+        updates["pdk_model"] = args.pdk_model
+    if args.width_um is not None:
+        updates["width_m"] = args.width_um * 1e-6
+    if args.length_um is not None:
+        updates["length_m"] = args.length_um * 1e-6
+    if args.vds is not None:
+        updates["vds_v"] = args.vds
+    result = replace(config, **updates)
+    validate_config(result)
+    return result
+
+
+def build_devices(config: CharacterizationConfig) -> tuple[DeviceSpec, ...]:
+    devices = []
+    for polarity, prefix, model in (
+        ("nmos", "MN", config.nmos_model),
+        ("pmos", "MP", config.pmos_model),
+    ):
+        for index, vds_v in enumerate(config.vds_v):
+            devices.append(DeviceSpec(f"{prefix}{index:03d}", model, polarity, vds_v))
+    return tuple(devices)
+
+
+def spectre_number(value: float) -> str:
+    return format(value, ".12g")
+
+
+def write_netlist(
+    path: Path, config: CharacterizationConfig, devices: tuple[DeviceSpec, ...]
+) -> None:
+    lines = [
+        "simulator lang=spectre",
+        "",
+        f"// Generated by run_tsmc40.py profile={config.profile}.",
+        f'include "{config.pdk_model}" section={config.corner}',
+        "",
+        f"parameters VSWEEP={spectre_number(config.vgs_start_v)}",
+        "",
+        "VGN (gn 0) vsource dc=VSWEEP",
+        "VGP (gp 0) vsource dc=-VSWEEP",
+        "",
+    ]
+    for device in devices:
+        node = f"d{device.instance.lower()}"
+        sign = "" if device.polarity == "nmos" else "-"
+        lines.append(
+            f"VD{device.instance} ({node} 0) vsource dc={sign}{spectre_number(device.vds_v)}"
+        )
+    lines.append("")
+    for device in devices:
+        node = f"d{device.instance.lower()}"
+        gate = "gn" if device.polarity == "nmos" else "gp"
+        lines.append(
+            f"{device.instance} ({node} {gate} 0 0) {device.model} "
+            f"w={spectre_number(config.width_m)} l={spectre_number(config.length_m)}"
+        )
+    lines.append("")
+    fields = " ".join(f"{{instance}}:{field}" for field in SAVE_FIELDS)
+    for device in devices:
+        lines.append(f"save {fields.format(instance=device.instance)}")
+    lines.extend(
+        (
+            "",
+            "dc1 dc param=VSWEEP "
+            f"start={spectre_number(config.vgs_start_v)} "
+            f"stop={spectre_number(config.vgs_stop_v)} "
+            f"step={spectre_number(config.vgs_step_v)}",
+            "",
+        )
+    )
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def run_checked(command: list[str], cwd: Path, stdout_path: Path | None = None) -> None:
@@ -73,11 +265,12 @@ def run_checked(command: list[str], cwd: Path, stdout_path: Path | None = None) 
     if completed.returncode != 0:
         captured = "" if stdout_handle else (completed.stdout or "")
         raise RuntimeError(
-            f"command failed with exit code {completed.returncode}: {' '.join(command)}\n{captured[-4000:]}"
+            f"command failed with exit code {completed.returncode}: {' '.join(command)}\n"
+            f"{captured[-4000:]}"
         )
 
 
-def parse_psfascii(path: Path) -> list[dict[str, float]]:
+def parse_psfascii(path: Path, expected_points: int) -> list[dict[str, float]]:
     value_pattern = re.compile(
         r'^"(?P<name>[^"]+)"\s+(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)$'
     )
@@ -109,24 +302,31 @@ def parse_psfascii(path: Path) -> list[dict[str, float]]:
 
     if current is not None:
         rows.append(current)
-    if len(rows) != EXPECTED_POINTS:
-        raise RuntimeError(f"expected {EXPECTED_POINTS} sweep points, found {len(rows)} in {path}")
+    if len(rows) != expected_points:
+        raise RuntimeError(
+            f"expected {expected_points} sweep points, found {len(rows)} in {path}"
+        )
     return rows
 
 
 def derive_device_rows(
-    raw_rows: list[dict[str, float]], instance: str, vds_v: float
+    raw_rows: list[dict[str, float]], device: DeviceSpec, width_m: float
 ) -> list[dict[str, float]]:
     output: list[dict[str, float]] = []
     for raw in raw_rows:
-        values = {field: abs(raw[f"{instance}:{field}"]) for field in RAW_FIELDS}
+        try:
+            values = {field: abs(raw[f"{device.instance}:{field}"]) for field in RAW_FIELDS}
+        except KeyError as exc:
+            raise RuntimeError(
+                f"missing operating-point field {exc.args[0]!r} for {device.model}"
+            ) from exc
         ids = values["ids"]
         gm = values["gm"]
         gds = values["gds"]
         cgg = values["cgg"]
         derived = {
             "vgs_v": raw["VSWEEP"],
-            "vds_v": vds_v,
+            "vds_v": device.vds_v,
             "id_a": ids,
             "gm_s": gm,
             "gds_s": gds,
@@ -138,16 +338,18 @@ def derive_device_rows(
             "gm_id_per_v": gm / ids if ids > 0.0 else math.nan,
             "gm_ro": gm / gds if gds > 0.0 else math.nan,
             "ft_hz": gm / (2.0 * math.pi * cgg) if cgg > 0.0 else math.nan,
-            "id_w_a_per_m": ids / WIDTH_M,
+            "id_w_a_per_m": ids / width_m,
         }
         if not all(math.isfinite(value) for value in derived.values()):
-            raise RuntimeError(f"non-finite result for {instance} at VGS={raw['VSWEEP']}")
+            raise RuntimeError(
+                f"non-finite result for {device.instance} at VGS={raw['VSWEEP']}"
+            )
         output.append(derived)
     return output
 
 
 def csv_name(model: str, vds_v: float) -> str:
-    bias = f"{vds_v:.2f}".replace(".", "p")
+    bias = f"{vds_v:.4g}".replace(".", "p")
     return f"tsmc40_{model}_vds_{bias}.csv"
 
 
@@ -159,10 +361,12 @@ def write_device_csv(path: Path, rows: list[dict[str, float]]) -> None:
 
 
 def write_combined_csv(
-    path: Path, datasets: dict[tuple[str, float], list[dict[str, float]]]
+    path: Path,
+    config: CharacterizationConfig,
+    datasets: dict[tuple[str, float], list[dict[str, float]]],
 ) -> None:
-    fields = ("model", "polarity", "corner", "l_m", "w_m") + CSV_FIELDS
-    polarities = {"nch": "nmos", "pch": "pmos"}
+    fields = ("profile", "model", "polarity", "corner", "l_m", "w_m") + CSV_FIELDS
+    polarities = {config.nmos_model: "nmos", config.pmos_model: "pmos"}
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
@@ -170,11 +374,12 @@ def write_combined_csv(
             for row in rows:
                 writer.writerow(
                     {
+                        "profile": config.profile,
                         "model": model,
                         "polarity": polarities[model],
-                        "corner": CORNER,
-                        "l_m": LENGTH_M,
-                        "w_m": WIDTH_M,
+                        "corner": config.corner,
+                        "l_m": config.length_m,
+                        "w_m": config.width_m,
                         **row,
                     }
                 )
@@ -184,29 +389,38 @@ def gnuplot_quote(path: Path) -> str:
     return str(path.resolve()).replace("\\", "/").replace("'", "''")
 
 
+def format_length(value_m: float) -> str:
+    if value_m < 1e-6:
+        return f"{value_m * 1e9:g}nm"
+    return f"{value_m * 1e6:g}um"
+
+
 def create_plot_script(
     path: Path,
     output_svg: Path,
+    config: CharacterizationConfig,
     model: str,
     polarity: str,
     csv_paths: list[tuple[float, Path]],
 ) -> None:
-    colors = ("#0072B2", "#D55E00", "#009E73")
+    colors = ("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#000000")
 
     def plot_clause(x_expr: str, y_expr: str) -> str:
         clauses = []
-        for index, ((vds, csv_path), color) in enumerate(zip(csv_paths, colors), start=1):
+        for index, (vds, csv_path) in enumerate(csv_paths):
+            color = colors[index % len(colors)]
             clauses.append(
                 f"'{gnuplot_quote(csv_path)}' using {x_expr}:{y_expr} with lines "
-                f"lw 2 lc rgb '{color}' title 'VDS={vds:.2f} V'"
+                f"lw 2 lc rgb '{color}' title 'VDS={vds:g} V'"
             )
-        return ", \\\n+    ".join(clauses)
+        return ", \\\n    ".join(clauses)
 
-    device_label = "NMOS nch" if polarity == "nmos" else "PMOS pch"
+    device_label = f"NMOS {model}" if polarity == "nmos" else f"PMOS {model}"
+    geometry = f"W/L={format_length(config.width_m)}/{format_length(config.length_m)}"
     script = f"""set datafile separator ','
 set terminal svg size 1400,1000 enhanced font 'Arial,16'
 set output '{gnuplot_quote(output_svg)}'
-set multiplot layout 2,2 rowsfirst title 'TSMC40 {device_label}, TT, W/L=1um/40nm' font ',20'
+set multiplot layout 2,2 rowsfirst title 'TSMC40 {device_label}, {config.corner}, {geometry}' font ',20'
 set grid back lc rgb '#d9d9d9'
 set border lw 1.2
 set key top right
@@ -214,25 +428,25 @@ set tics out
 
 set xlabel '|VGS| (V)'
 set ylabel 'gm/ID (1/V)'
-set xrange [0:1.1]
-set yrange [0:26]
+set xrange [{config.vgs_start_v}:{config.vgs_stop_v}]
+set yrange [0:{config.plot_gmid_max}]
 plot {plot_clause('1', '11')}
 
 set xlabel 'gm/ID (1/V)'
 set ylabel 'fT = gm/(2*pi*Cgg) (GHz)'
-set xrange [2:25]
+set xrange [2:{config.plot_gmid_max}]
 set yrange [0:*]
 plot {plot_clause('11', '($13/1e9)')}
 
 set xlabel 'gm/ID (1/V)'
 set ylabel 'Intrinsic gain gm/gds'
-set xrange [2:25]
+set xrange [2:{config.plot_gmid_max}]
 set yrange [0:*]
 plot {plot_clause('11', '12')}
 
 set xlabel 'gm/ID (1/V)'
 set ylabel 'ID/W (uA/um)'
-set xrange [2:25]
+set xrange [2:{config.plot_gmid_max}]
 set logscale y
 set yrange [1e-4:*]
 plot {plot_clause('11', '14')}
@@ -243,7 +457,6 @@ unset multiplot
 
 
 def ensure_white_svg_background(path: Path) -> None:
-    """Insert an explicit white background for dark-theme SVG/PNG viewers."""
     svg = path.read_text(encoding="utf-8")
     if 'id="plot-background"' in svg:
         return
@@ -259,25 +472,63 @@ def nearest_row(rows: list[dict[str, float]], target_gmid: float) -> dict[str, f
     return min(rows, key=lambda row: abs(row["gm_id_per_v"] - target_gmid))
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profiles-file", type=Path, default=DEFAULT_PROFILES)
+    parser.add_argument("--profile", default="1v1")
+    parser.add_argument("--list-profiles", action="store_true")
     parser.add_argument("--spectre", type=Path, default=DEFAULT_SPECTRE)
     parser.add_argument("--gnuplot", type=Path, default=DEFAULT_GNUPLOT)
-    parser.add_argument("--output", type=Path, default=BASE_DIR / "results")
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--skip-simulation", action="store_true")
-    args = parser.parse_args()
+    parser.add_argument("--pdk-model")
+    parser.add_argument("--corner")
+    parser.add_argument("--nmos-model")
+    parser.add_argument("--pmos-model")
+    parser.add_argument("--width-um", type=float)
+    parser.add_argument("--length-um", type=float)
+    parser.add_argument("--vgs-start-v", type=float)
+    parser.add_argument("--vgs-stop-v", type=float)
+    parser.add_argument("--vgs-step-v", type=float)
+    parser.add_argument("--vds", type=parse_vds, help="comma-separated positive VDS magnitudes")
+    parser.add_argument("--plot-gmid-max", type=float)
+    return parser
 
-    for required in (NETLIST, PDK_MODEL, args.spectre, args.gnuplot):
+
+def main() -> int:
+    args = build_parser().parse_args()
+    profiles = load_profiles(args.profiles_file.resolve())
+    if args.list_profiles:
+        for name, profile in profiles.items():
+            print(
+                f"{name}: {profile.description}; {profile.nmos_model}/{profile.pmos_model}; "
+                f"L={format_length(profile.length_m)}; VGS<={profile.vgs_stop_v:g} V"
+            )
+        return 0
+    if args.profile not in profiles:
+        raise ValueError(
+            f"unknown profile {args.profile!r}; available: {', '.join(sorted(profiles))}"
+        )
+    config = apply_overrides(profiles[args.profile], args)
+    devices = build_devices(config)
+
+    for required in (Path(config.pdk_model), args.spectre, args.gnuplot):
         if not required.exists():
             raise FileNotFoundError(required)
 
-    output_dir = args.output.resolve()
+    output_dir = (
+        args.output.resolve()
+        if args.output is not None
+        else (BASE_DIR / "results" / config.profile).resolve()
+    )
     raw_dir = output_dir / "raw"
     csv_dir = output_dir / "csv"
     plot_dir = output_dir / "plots"
     for directory in (raw_dir, csv_dir, plot_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
+    netlist_path = raw_dir / "characterize.scs"
+    write_netlist(netlist_path, config, devices)
     log_path = raw_dir / "spectre.log"
     console_path = raw_dir / "spectre.console.log"
     if not args.skip_simulation:
@@ -289,7 +540,7 @@ def main() -> int:
                 str(log_path),
                 "-format",
                 "psfascii",
-                str(NETLIST),
+                str(netlist_path),
             ],
             cwd=raw_dir,
             stdout_path=console_path,
@@ -298,30 +549,33 @@ def main() -> int:
     psf_path = raw_dir / "characterize.raw" / "dc1.dc"
     if not psf_path.exists():
         raise FileNotFoundError(psf_path)
-    raw_rows = parse_psfascii(psf_path)
+    raw_rows = parse_psfascii(psf_path, config.expected_points)
 
     datasets: dict[tuple[str, float], list[dict[str, float]]] = {}
     instance_to_csv: dict[str, Path] = {}
-    for instance, model, _polarity, vds_v in DEVICES:
-        rows = derive_device_rows(raw_rows, instance, vds_v)
-        datasets[(model, vds_v)] = rows
-        output_csv = csv_dir / csv_name(model, vds_v)
+    for device in devices:
+        rows = derive_device_rows(raw_rows, device, config.width_m)
+        datasets[(device.model, device.vds_v)] = rows
+        output_csv = csv_dir / csv_name(device.model, device.vds_v)
         write_device_csv(output_csv, rows)
-        instance_to_csv[instance] = output_csv
+        instance_to_csv[device.instance] = output_csv
 
     combined_csv = csv_dir / "tsmc40_gmid_all.csv"
-    write_combined_csv(combined_csv, datasets)
+    write_combined_csv(combined_csv, config, datasets)
 
     plot_outputs: list[Path] = []
-    for model, polarity in (("nch", "nmos"), ("pch", "pmos")):
+    for model, polarity in (
+        (config.nmos_model, "nmos"),
+        (config.pmos_model, "pmos"),
+    ):
         csv_paths = [
-            (vds, instance_to_csv[instance])
-            for instance, device_model, device_polarity, vds in DEVICES
-            if device_model == model and device_polarity == polarity
+            (device.vds_v, instance_to_csv[device.instance])
+            for device in devices
+            if device.model == model and device.polarity == polarity
         ]
         svg_path = plot_dir / f"tsmc40_{model}_gmid.svg"
         gp_path = plot_dir / f"tsmc40_{model}_gmid.gnuplot"
-        create_plot_script(gp_path, svg_path, model, polarity, csv_paths)
+        create_plot_script(gp_path, svg_path, config, model, polarity, csv_paths)
         run_checked([str(args.gnuplot), str(gp_path)], cwd=plot_dir)
         ensure_white_svg_background(svg_path)
         plot_outputs.append(svg_path)
@@ -335,39 +589,49 @@ def main() -> int:
             plot_outputs.append(png_path)
 
     representative: dict[str, dict[str, dict[str, float]]] = {}
-    for model in ("nch", "pch"):
-        rows = datasets[(model, 0.55)]
+    middle_vds = config.vds_v[len(config.vds_v) // 2]
+    for model in (config.nmos_model, config.pmos_model):
+        rows = datasets[(model, middle_vds)]
         representative[model] = {
             str(target): nearest_row(rows, target) for target in (5.0, 10.0, 15.0, 20.0)
         }
 
     summary = {
-        "pdk_model": str(PDK_MODEL),
-        "corner": CORNER,
-        "models": ["nch", "pch"],
-        "drawn_length_m": LENGTH_M,
-        "width_m": WIDTH_M,
-        "vds_v": [0.05, 0.55, 1.10],
-        "vgs_sweep_v": {"start": 0.0, "stop": 1.1, "step": 0.005},
-        "points_per_curve": EXPECTED_POINTS,
+        "profile": config.profile,
+        "description": config.description,
+        "pdk_model": str(config.pdk_model),
+        "corner": config.corner,
+        "models": [config.nmos_model, config.pmos_model],
+        "drawn_length_m": config.length_m,
+        "width_m": config.width_m,
+        "vds_v": list(config.vds_v),
+        "vgs_sweep_v": {
+            "start": config.vgs_start_v,
+            "stop": config.vgs_stop_v,
+            "step": config.vgs_step_v,
+        },
+        "points_per_curve": config.expected_points,
+        "generated_netlist": str(netlist_path),
         "combined_csv": str(combined_csv),
         "plots": [str(path) for path in plot_outputs],
-        "representative_at_vds_0p55": representative,
+        f"representative_at_vds_{middle_vds:g}": representative,
     }
     summary_path = output_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
-    print("TSMC40 gm/ID characterization completed")
+    print(f"TSMC40 gm/ID characterization completed: profile={config.profile}")
+    print(f"  models:     {config.nmos_model} / {config.pmos_model}")
+    print(f"  geometry:   W={format_length(config.width_m)}, L={format_length(config.length_m)}")
     print(f"  raw points: {len(raw_rows)}")
     print(f"  curves:     {len(datasets)}")
     print(f"  CSV:        {combined_csv}")
     for plot in plot_outputs:
         print(f"  plot:       {plot}")
     print(f"  summary:    {summary_path}")
-    for model in ("nch", "pch"):
+    for model in (config.nmos_model, config.pmos_model):
         row = representative[model]["10.0"]
         print(
-            f"  {model} @ VDS=0.55 V, gm/ID~10: "
+            f"  {model} @ VDS={middle_vds:g} V, gm/ID~10: "
             f"VGS={row['vgs_v']:.3f} V, ID/W={row['id_w_a_per_m']:.3f} uA/um, "
             f"fT={row['ft_hz']/1e9:.2f} GHz, gm/gds={row['gm_ro']:.2f}"
         )
