@@ -1,6 +1,6 @@
 ---
 name: gmoverid
-description: "gm/ID transistor characterization and design methodology, based on ngspice + Python. Two independent workflows: (1) Characterization — generates three standard curve sets for any MOSFET model: gate capacitance (Cgg/Cgs/Cgd/Cgb vs Vgs), gm/ID four-quadrant characteristics (gm/Id vs Vov, Id/W vs gm/Id, fT vs gm/Id, gm·ro vs gm/Id), and IV characteristics (linear/log Id vs Vov, output curves). Supports 180 nm single-node and 45/22 nm HP multi-node flows with built-in PTM model files (180/45/22 nm) — no extra downloads required. (2) Design — the GmIdTable class builds a lookup table from simulation data (cached to logs/cache/) and provides lookup(), size(), size_from_ft(), size_from_gmro() APIs for NMOS/PMOS transistor sizing using the gm/ID methodology. Only depends on the ngspice skill. Use this skill when setting up or extending a gm/ID characterization project, generating characteristic curves, interpreting design curves, or sizing transistors by the gm/ID method."
+description: "Characterize MOSFETs and size transistors with the gm/ID methodology. Use for curve/table generation from built-in PTM models with ngspice, installed foundry PDKs with Spectre, gm/ID plot interpretation, or lookup-table-based NMOS/PMOS sizing."
 ---
 
 # gm/ID Characterization and Design Skill
@@ -8,7 +8,17 @@ description: "gm/ID transistor characterization and design methodology, based on
 > **Important — do not modify skill files during normal use.**
 > All code edits, new scripts, plots, and simulation outputs should go into the user's **project working directory** (outside `.claude/`), not into this skill folder. Only modify the skill assets (`assets/`, `SKILL.md`, `references/`) when the user explicitly asks to improve or extend the skill itself.
 
-**Dependency**: `ngspice` skill (netlist execution, wrdata parsing). Model files are built in — the `transistor-models` skill is not required.
+**Dependencies by route**: the built-in PTM route uses the `ngspice` skill. An
+installed foundry PDK supported by Cadence Spectre uses the `spectre` skill.
+
+## Workflow Routing
+
+- For the built-in PTM 180/45/22 nm models or a standalone SPICE `.lib`, use
+  Workflow 1 below.
+- For a user-authorized installed foundry PDK with Spectre, use the `spectre`
+  skill for model/corner discovery, simulation, and PSF extraction, then return
+  the normalized device table to this skill for gm/ID plots and sizing.
+- For sizing from an existing characterization table, use Workflow 2.
 
 ## Asset Files
 
@@ -71,6 +81,10 @@ All paths resolve automatically via `Path(__file__).resolve().parent` — no pat
 1. Copy the model `.lib` into `models/` (download from [mec.umn.edu/ptm](https://mec.umn.edu/ptm) or install the `transistor-models` skill)
 2. Add an entry to `MODEL_INFO` in `simulate_gmoverid.py` (see conventions.md §3)
 3. Add an entry to `NODE_CFG` in `run_multinode.py`
+
+This three-step route is for standalone SPICE model cards. For an installed
+foundry PDK, do not flatten or copy its models; use the Spectre workflow linked
+under Workflow Routing.
 
 ---
 
@@ -466,3 +480,7 @@ See `references/conventions.md` for full details:
 - §8–9  Physical sanity-check values, common errors and fixes
 - §10   Extending the skill (new nodes, new plot types, new channel lengths)
 - §11   Full design API reference (GmIdTable, print_op, cache naming, unit conventions)
+
+For an installed proprietary PDK, use the `spectre` skill for simulator and
+PDK mechanics. Keep this skill responsible for normalized gm/ID quantities,
+plots, validation, lookup, and transistor sizing.

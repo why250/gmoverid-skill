@@ -21,6 +21,11 @@ circuitikz/
 验收标准.md
 validation/
 
+# Sky130A runtime outputs (the external PDK itself is never stored here)
+practice/sky130/data/
+practice/sky130/smoke/
+practice/sky130/probe_internal.dat
+
 
 CLAUDE.md
 .claude/

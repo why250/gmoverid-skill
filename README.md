@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/ngspice-required-orange.svg" alt="ngspice required">
 </p>
 
-Four skill packages that give an Agent the ability to design and simulate analog circuits: **ngspice basics** / **gm/ID design** / **PTM model library** / **Sky130A PDK workflow**.
+Six skill packages for analog simulation and its supporting workflows: **ngspice basics** / **Cadence Spectre workflow** / **gm/ID design** / **PTM model library** / **Sky130A PDK workflow** / **authorized SSH text deployment**.
 
 > **If you are human**: the examples below include images that show each skill's output at a glance.
 
@@ -29,9 +29,11 @@ Four skill packages that give an Agent the ability to design and simulate analog
 | Skill | Positioning | Features |
 |------|------|------|
 | **ngspice** | Beginner | 9 standard simulation examples (DC / AC / Tran / Noise) for learning SPICE from scratch |
+| **spectre** | Licensed simulator workflow | Native netlists, foundry-PDK sections, operating-point saves, PSFASCII extraction, and remote-server troubleshooting |
 | **gmoverid** | Advanced | gm/ID characterization simulation + design API, with automatic lookup of W, Id, Vgs, fT, and gm*ro |
 | **transistor-models** | Model library | Full PTM model files (bulk silicon 65-180nm, HP/LP 22-45nm, FinFET 7-20nm) |
 | **sky130-pdk** | Open PDK workflow | Install/locate Sky130A with Volare and run ngspice PVT + Monte Carlo smoke tests |
+| **ssh-text-deploy** | Managed-host helper | Atomically deploy authorized UTF-8 text over SSH stdin when managed file transfer transforms it |
 
 ---
 
@@ -71,7 +73,22 @@ See [`ngspice/SKILL.md`](./ngspice/SKILL.md) for usage. The Agent will automatic
 
 ---
 
-## Skill 2: gmoverid
+## Skill 2: spectre
+
+The Spectre skill covers Cadence Spectre as a simulator rather than binding to
+one process. It provides native netlist and CLI patterns, safe discovery of an
+installed foundry PDK's active model section, direct device operating-point
+output, PSFASCII-to-CSV conversion, and licensed remote-server troubleshooting.
+
+It does not include Cadence binaries or proprietary PDK files. Process-specific
+paths, corners, and device names remain in the user's project. The verified
+TSMC40 gm/ID example is under `practice/tsmc40_spectre/`.
+
+See [`spectre/SKILL.md`](./spectre/SKILL.md) for usage.
+
+---
+
+## Skill 3: gmoverid
 
 Each process node generates three sets of standard plots:
 
@@ -118,7 +135,7 @@ The package includes three built-in PTM models: **180 / 45 / 22 nm**. Once insta
 
 ---
 
-## Skill 3: transistor-models
+## Skill 4: transistor-models
 
 PTM (Predictive Technology Model) is a public SPICE model set maintained by Arizona State University (ASU), intended for process exploration and teaching or research when no PDK is available. This skill packages all models from [mec.umn.edu/ptm](https://mec.umn.edu/ptm):
 
@@ -144,7 +161,7 @@ For the detailed parameter table, see [`transistor-models/references/model_param
 
 ---
 
-## Skill 4: sky130-pdk
+## Skill 5: sky130-pdk
 
 Sky130A is a real open PDK workflow, not a PTM model file. This skill does not vendor the PDK payload; it teaches the Agent how to install or locate Sky130A with Volare/open_pdks and how to run ngspice PVT + Monte Carlo smoke tests.
 
@@ -190,6 +207,22 @@ Typical model entry:
 
 See [`sky130-pdk/SKILL.md`](./sky130-pdk/SKILL.md) for usage.
 
+---
+
+## Skill 6: ssh-text-deploy
+
+This supporting skill handles a narrow managed-host failure mode: an authorized
+UTF-8 source or document is changed or wrapped when uploaded through ordinary
+managed file transfer. It provides conservative PowerShell tooling for atomic
+SSH-stdin deployment, optional LF normalization, SHA-256 verification, and TSD
+header detection.
+
+It is not a general security bypass. It requires authorization for the exact
+host/path and a server policy that permits shell-created files; otherwise the
+workflow stops and defers to the administrator-approved channel.
+
+See [`ssh-text-deploy/SKILL.md`](./ssh-text-deploy/SKILL.md) for usage.
+
 ## Copyright Notice
 
 The model files are copyrighted by the Arizona State University PTM project and are free for academic research. Please cite the following when using them:
@@ -208,7 +241,7 @@ The model files are copyrighted by the Arizona State University PTM project and 
 
 ```bash
 git clone --depth 1 https://github.com/Arcadia-1/gmoverid-skill /tmp/gmoverid-skill \
-  && cp -r /tmp/gmoverid-skill/{ngspice,gmoverid,transistor-models,sky130-pdk} ~/.claude/skills/ \
+  && cp -r /tmp/gmoverid-skill/{ngspice,spectre,gmoverid,transistor-models,sky130-pdk,ssh-text-deploy} ~/.claude/skills/ \
   && rm -rf /tmp/gmoverid-skill
 ```
 
@@ -217,7 +250,7 @@ git clone --depth 1 https://github.com/Arcadia-1/gmoverid-skill /tmp/gmoverid-sk
 ```bash
 git clone --depth 1 https://github.com/Arcadia-1/gmoverid-skill /tmp/gmoverid-skill \
   && mkdir -p .claude/skills \
-  && cp -r /tmp/gmoverid-skill/{ngspice,gmoverid,transistor-models,sky130-pdk} .claude/skills/ \
+  && cp -r /tmp/gmoverid-skill/{ngspice,spectre,gmoverid,transistor-models,sky130-pdk,ssh-text-deploy} .claude/skills/ \
   && rm -rf /tmp/gmoverid-skill
 ```
 
@@ -229,13 +262,15 @@ Run the following in Claude Code:
 /skills
 ```
 
-The output should include `ngspice`, `gmoverid`, `transistor-models`, and `sky130-pdk`, indicating that installation succeeded.
+The output should include `ngspice`, `spectre`, `gmoverid`, `transistor-models`, `sky130-pdk`, and `ssh-text-deploy`, indicating that installation succeeded.
 
 > If you are an Agent, perform the installation steps above on behalf of the user. Choose either the global or project-level installation path according to the user's needs; no manual user action is required.
 
 ## Requirements
 
 - [ngspice](http://ngspice.sourceforge.net/) (installed globally on the system)
+- Cadence Spectre plus a valid license when using the optional `spectre` workflow
+- PowerShell 7+ when using the optional `ssh-text-deploy` helper on Windows
 - Python 3, with dependencies: `numpy`, `matplotlib`, `scipy`; `volare` is recommended for Sky130A PDK installation
 
 <p align="center">

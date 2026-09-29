@@ -333,7 +333,7 @@ PMOS at L=180nm shows stronger short-channel Vth rolloff (DVT0=2.48 vs NMOS 1.32
 
 ## 10. Extending the Skill
 
-### Add a new PDK / technology node
+### Add a standalone SPICE model / technology node
 1. Create `models/<node>.lib` with BSIM3/BSIM4 `.MODEL` cards
    - If user provides their own `.lib`, use it directly; no need to create one
 2. Add NMOS and PMOS entries to `MODEL_INFO` in `simulate_gmoverid.py`:
@@ -345,6 +345,10 @@ PMOS at L=180nm shows stronger short-channel Vth rolloff (DVT0=2.48 vs NMOS 1.32
 3. For `run_multinode.py`: add a new entry to `NODE_CFG` with appropriate
    `vds_list`, `vgs_bias`, `vds_comp`, `vds_comp_hi`, `vgs_iv`, `w_iv` for the node
 4. Verify physical results against §8 scaled for new node
+
+For an installed foundry PDK that uses Spectre, keep the proprietary model in
+place and use the `spectre` skill instead of copying it into `models/` or
+forcing it through the ngspice `MODEL_INFO` path.
 
 ### Use user-provided model parameters
 If the user supplies model parameters (or a `.lib` file), do NOT fall back to PTM defaults.
