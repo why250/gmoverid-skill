@@ -26,6 +26,9 @@ practice/sky130/data/
 practice/sky130/smoke/
 practice/sky130/probe_internal.dat
 
+# Proprietary-PDK derived results copied from authorized remote servers
+practice/tsmc40_spectre/backup/
+
 
 CLAUDE.md
 .claude/

@@ -242,6 +242,19 @@ unset multiplot
     path.write_text(script, encoding="utf-8")
 
 
+def ensure_white_svg_background(path: Path) -> None:
+    """Insert an explicit white background for dark-theme SVG/PNG viewers."""
+    svg = path.read_text(encoding="utf-8")
+    if 'id="plot-background"' in svg:
+        return
+    opening_tag = re.search(r"<svg\b.*?>", svg, flags=re.DOTALL)
+    if opening_tag is None:
+        raise RuntimeError(f"SVG root element was not found: {path}")
+    background = '\n<rect id="plot-background" width="100%" height="100%" fill="white"/>\n'
+    svg = svg[: opening_tag.end()] + background + svg[opening_tag.end() :]
+    path.write_text(svg, encoding="utf-8")
+
+
 def nearest_row(rows: list[dict[str, float]], target_gmid: float) -> dict[str, float]:
     return min(rows, key=lambda row: abs(row["gm_id_per_v"] - target_gmid))
 
@@ -310,11 +323,15 @@ def main() -> int:
         gp_path = plot_dir / f"tsmc40_{model}_gmid.gnuplot"
         create_plot_script(gp_path, svg_path, model, polarity, csv_paths)
         run_checked([str(args.gnuplot), str(gp_path)], cwd=plot_dir)
+        ensure_white_svg_background(svg_path)
         plot_outputs.append(svg_path)
         converter = shutil.which("rsvg-convert")
         if converter:
             png_path = svg_path.with_suffix(".png")
-            run_checked([converter, "-o", str(png_path), str(svg_path)], cwd=plot_dir)
+            run_checked(
+                [converter, "--background-color", "white", "-o", str(png_path), str(svg_path)],
+                cwd=plot_dir,
+            )
             plot_outputs.append(png_path)
 
     representative: dict[str, dict[str, dict[str, float]]] = {}
