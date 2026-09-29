@@ -51,6 +51,7 @@ if ($profileList.Count -eq 0 -or $profileList.Where({ $_ -notmatch '^[A-Za-z0-9_
 }
 $files = @(
     @{ Local = Join-Path $baseDir 'run_tsmc40.py'; Remote = "$RemoteDir/run_tsmc40.py"; Executable = $true },
+    @{ Local = Join-Path $baseDir 'validate_results.py'; Remote = "$RemoteDir/validate_results.py"; Executable = $true },
     @{ Local = Join-Path $baseDir 'README.md'; Remote = "$RemoteDir/README.md"; Executable = $false },
     @{ Local = Join-Path $baseDir 'profiles.json'; Remote = "$RemoteDir/profiles.json"; Executable = $false }
 )
@@ -81,9 +82,9 @@ foreach ($item in $files) {
         -Executable:$item.Executable
 }
 
-& ssh -o BatchMode=yes $SshHost "python3 $RemoteDir/run_tsmc40.py --help >/dev/null"
+& ssh -o BatchMode=yes $SshHost "python3 $RemoteDir/run_tsmc40.py --help >/dev/null && python3 $RemoteDir/validate_results.py --help >/dev/null"
 if ($LASTEXITCODE -ne 0) {
-    throw 'The deployed Python runner did not pass its --help smoke test'
+    throw 'A deployed Python entry point did not pass its --help smoke test'
 }
 
 Write-Host 'Deployment verified: all files passed SHA-256 and TSD-header checks.'

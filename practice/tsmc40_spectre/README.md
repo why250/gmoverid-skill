@@ -29,6 +29,8 @@ ssh IC_Server
 cd /home/userone/AAAIC/test_tb/gmid_tsmc40
 ./run_tsmc40.py --profile 1v1
 ./run_tsmc40.py --profile 2v5
+./validate_results.py results/1v1
+./validate_results.py results/2v5
 ```
 
 从当前 Windows 项目部署并运行两套器件：
@@ -71,6 +73,10 @@ pwsh .\practice\tsmc40_spectre\deploy_remote.ps1 -Run -Profiles '1v1,2v5'
 - `summary.json`：实际配置与代表性工作点；
 - `raw/characterize.scs`：本次运行生成的可复现网表；
 - `raw/characterize.raw/` 和 `raw/spectre.log`：原始结果与日志。
+
+`validate_results.py` 根据 `summary.json` 自动核对曲线数、扫描点数、有限值、
+VGS 间距、Id 单调性、gm/ID 下降分支、合并表行数、Spectre 零错误结束状态和
+SVG 图件完整性。验证窗口可用 `--gmid-min` / `--gmid-max` 调整。
 
 `ft` 定义为 `gm/(2*pi*Cgg)`，`gm_ro` 定义为 `gm/gds`。PMOS 采用源极/体端
 接地、栅漏施加负电压的等效偏置，表中电压和电流统一保存为幅值。结果是裸器件

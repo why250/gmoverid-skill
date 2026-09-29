@@ -48,6 +48,32 @@ Diffusion geometry, fingers, stress, WPE/LOD, mismatch, and extracted
 parasitics require PDK-specific instance parameters or extracted views. Do not
 imply that a bare `w/l` primitive captures them.
 
+## Scale characterization with profiles
+
+When one runner covers multiple voltage classes, threshold flavors, or channel
+lengths, keep the execution engine stable and move process-specific choices
+into validated profiles. A profile should carry the model include and section,
+primitive names, drawn dimensions, gate sweep, fixed drain biases, and plotting
+range. Generate the native netlist for each run and preserve it beside the raw
+results so the table is reproducible without copying PDK files.
+
+Keep outputs isolated by profile. Record the resolved configuration in a
+machine-readable summary, and include profile, model, corner, `L`, and `W` in
+the combined table. Validate model and section identifiers before rendering a
+netlist; treat PDK paths as paths for the remote POSIX environment rather than
+letting a Windows control host reinterpret them.
+
+Before accepting a new profile:
+
+- confirm the device description, primitive mapping, terminal order, and drawn
+  defaults from CDF or an existing netlist;
+- require the configured sweep range to contain an integer number of steps;
+- check point counts, finite values, monotonic `Id` versus `Vgs`, and the
+  descending gm/ID branch used for lookup;
+- require a zero-error simulator completion and non-empty plots;
+- when refactoring an existing profile, compare its per-curve tables against
+  the previous known-good result before trusting new device families.
+
 ## Managed-server transfer policy
 
 Some managed IC servers wrap Python files received through `scp`; the remote
