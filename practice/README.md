@@ -37,6 +37,17 @@ powershell -ExecutionPolicy Bypass -File .\practice\sky130\run_sky130_practice.p
 
 详见 [`sky130/README.md`](sky130/README.md)。
 
+## GF180MCU BJT 真实模型
+
+垂直 NPN 的电流密度性能图谱位于 `gf180/`。首次运行自动下载固定版本的
+GF180MCU 官方 ngspice 模型：
+
+```powershell
+python .\practice\gf180\bjt_characterization_gf180.py
+```
+
+详见 [`gf180/README.md`](gf180/README.md)。
+
 ## TSMC40 真实 PDK（远端 Spectre）
 
 TSMC40 的配置驱动 gm/ID 实践位于 `tsmc40_spectre/`，内置 1.1 V

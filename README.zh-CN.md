@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/ngspice-required-orange.svg" alt="ngspice required">
 </p>
 
-六个面向模拟电路仿真及其配套流程的技能包：**ngspice 入门** / **Cadence Spectre 工作流** / **gm/ID 设计** / **PTM 模型库** / **Sky130A PDK 工作流** / **授权 SSH 文本部署**。
+七个面向模拟电路仿真及其配套流程的技能包：**ngspice 入门** / **LTspice 批处理仿真** / **Cadence Spectre 工作流** / **gm/ID 设计** / **PTM 模型库** / **Sky130A PDK 工作流** / **授权 SSH 文本部署**。
 
 > **如果你是人类**：下面有示例图片，可以直观了解每个技能的输出效果。
 
@@ -29,6 +29,7 @@
 | 技能 | 定位 | 功能 |
 |------|------|------|
 | **ngspice** | 入门 | 9 类标准仿真示例（DC / AC / Tran / Noise），从零学 SPICE |
+| **ltspice** | Windows 批处理工作流 | 文本网表自动化、ASCII RAW 解析，以及 PTM 180/45/22nm NMOS/PMOS gm/ID 示例 |
 | **spectre** | 商业仿真器工作流 | 原生网表、Foundry PDK section、工作点保存、PSFASCII 提取和远端服务器排障 |
 | **gmoverid** | 进阶 | gm/ID 表征仿真 + 设计 API，自动反查 W、Id、Vgs、fT、gm·ro |
 | **transistor-models** | 模型库 | PTM 全系列模型文件（体硅 65–180nm、HP/LP 22–45nm、FinFET 7–20nm） |
@@ -37,12 +38,15 @@
 
 ### 架构与技能关系
 
-六个技能不是必须串行安装的一条流水线，而是“仿真工具 + 设计方法 + 两类模型来源 + 部署辅助”的组合：
+七个技能不是必须串行安装的一条流水线，而是“仿真工具 + 设计方法 + 两类模型来源 + 部署辅助”的组合：
 
 ```text
 系统 ngspice 仿真器 ─┬─ ngspice：通用仿真教程与模板
                      ├─ gmoverid：PTM 器件表征、查表与尺寸设计
                      └─ sky130-pdk：Sky130A PVT / Monte Carlo 工作流
+
+Windows LTspice ─────┬─ ltspice：批处理、ASCII RAW 解析与 PTM gm/ID 示例
+                     └─ gmoverid：通过标准化数据表衔接完整尺寸设计流程
 
 Cadence Spectre ─────┬─ spectre：Foundry PDK、原生网表与 PSF 数据工作流
                      └─ gmoverid：接收标准化器件表，完成曲线与尺寸设计
@@ -54,6 +58,7 @@ ssh-text-deploy：受管服务器允许 shell 创建文件时使用的授权文�
 ```
 
 - **ngspice → gmoverid**：这是能力层面的基础与进阶关系。`gmoverid` 使用 ngspice 完成扫描和数据提取，得到尺寸后还应回到完整电路仿真验证。代码部署上两者保持自包含，`gmoverid` 不直接 import `ngspice` skill 的 Python 模块。
+- **ltspice → gmoverid**：`ltspice` 负责 Windows 批处理、RAW 解析和内置 PTM 模型的独立 gm/ID 示例；完整的查表、尺寸设计、电容、fT 和 gm·ro 工作流仍由 `gmoverid` 负责。
 - **spectre → gmoverid**：`spectre` 负责真实 Foundry PDK 的模型角、仿真执行和 PSF/工作点提取；`gmoverid` 负责标准化数据、曲线、查表和尺寸设计。两者之间通过数据表衔接。
 - **transistor-models → gmoverid（可选）**：`gmoverid` 已内置 180nm、45nm HP 和 22nm HP 模型；只有使用其他 PTM 节点时，才需要复制相应 `.lib`，并在 `MODEL_INFO` 等配置中注册。`transistor-models` 也可以脱离 `gmoverid`，直接用于 ngspice/HSPICE 项目。
 - **sky130-pdk 与 PTM 路线并列**：PTM 是面向教学和跨节点探索的预测模型；Sky130A 是真实开源 PDK，包含工艺角和统计模型。`sky130-pdk` 使用同一个系统 ngspice，但不依赖 `transistor-models`，当前也没有与 `gmoverid` 直接接通。
@@ -104,7 +109,23 @@ ssh-text-deploy：受管服务器允许 shell 创建文件时使用的授权文�
 
 ---
 
-## 技能2：spectre
+## 技能2：LTspice
+
+`ltspice` skill 提供 Windows 批处理运行器、无需额外 RAW 依赖的 ASCII
+解析器，以及内置 PTM 180nm、45nm HP、22nm HP 的 NMOS/PMOS gm/ID 示例。
+生成的网表、RAW/log、标准化数据表和曲线均保存在用户工作目录。
+
+运行仓库中的实践示例：
+
+```powershell
+pwsh .\practice\ltspice\run_ltspice_practice.ps1
+```
+
+详见 [`ltspice/SKILL.md`](./ltspice/SKILL.md)。
+
+---
+
+## 技能3：spectre
 
 `spectre` skill 面向 Cadence Spectre 通用能力，不绑定某一个工艺。它涵盖
 Spectre 原生网表和命令行、已安装 Foundry PDK 的模型角发现、器件工作点保存、
@@ -118,7 +139,7 @@ PSFASCII 转 CSV，以及商业许可证远端服务器的常见排障。
 
 ---
 
-## 技能3：gmoverid
+## 技能4：gmoverid
 
 每个工艺节点生成三套标准图：
 
@@ -165,7 +186,7 @@ print_op(op)
 
 ---
 
-## 技能4：transistor-models
+## 技能5：transistor-models
 
 PTM（预测性晶体管模型，Predictive Technology Model）是亚利桑那州立大学（Arizona State University, ASU）维护的一套公开 SPICE 模型，用于在没有 PDK 的情况下做工艺探索和教学研究。这个技能把 [mec.umn.edu/ptm](https://mec.umn.edu/ptm) 上的全部模型打包进来：
 
@@ -191,7 +212,7 @@ cp transistor-models/assets/models/finfet/nmos7mg_hp.lib <项目目录>/models/
 
 ---
 
-## 技能5：sky130-pdk
+## 技能6：sky130-pdk
 
 Sky130A 是真实的开源 PDK 工作流，不是 PTM 模型文件。这个技能不把 PDK 数据本体放进仓库，而是说明如何用 Volare/open_pdks 安装或定位 Sky130A，以及如何运行 ngspice PVT + Monte Carlo smoke 测试。
 
@@ -239,7 +260,7 @@ ngspice -b tb.spi
 
 ---
 
-## 技能6：ssh-text-deploy
+## 技能7：ssh-text-deploy
 
 这个辅助 skill 处理一个窄而明确的受管服务器问题：已授权的 UTF-8 源码或文档
 通过普通文件传输上传后被改变或包装。它提供 PowerShell 工具，经 SSH stdin 原子
@@ -270,7 +291,7 @@ ngspice -b tb.spi
 
 ```bash
 git clone --depth 1 https://github.com/Arcadia-1/gmoverid-skill /tmp/gmoverid-skill \
-  && cp -r /tmp/gmoverid-skill/{ngspice,spectre,gmoverid,transistor-models,sky130-pdk,ssh-text-deploy} ~/.claude/skills/ \
+  && cp -r /tmp/gmoverid-skill/{ngspice,ltspice,spectre,gmoverid,transistor-models,sky130-pdk,ssh-text-deploy} ~/.claude/skills/ \
   && rm -rf /tmp/gmoverid-skill
 ```
 
@@ -279,7 +300,7 @@ git clone --depth 1 https://github.com/Arcadia-1/gmoverid-skill /tmp/gmoverid-sk
 ```bash
 git clone --depth 1 https://github.com/Arcadia-1/gmoverid-skill /tmp/gmoverid-skill \
   && mkdir -p .claude/skills \
-  && cp -r /tmp/gmoverid-skill/{ngspice,spectre,gmoverid,transistor-models,sky130-pdk,ssh-text-deploy} .claude/skills/ \
+  && cp -r /tmp/gmoverid-skill/{ngspice,ltspice,spectre,gmoverid,transistor-models,sky130-pdk,ssh-text-deploy} .claude/skills/ \
   && rm -rf /tmp/gmoverid-skill
 ```
 
@@ -291,13 +312,14 @@ git clone --depth 1 https://github.com/Arcadia-1/gmoverid-skill /tmp/gmoverid-sk
 /skills
 ```
 
-输出列表中应出现 `ngspice`、`spectre`、`gmoverid`、`transistor-models`、`sky130-pdk` 和 `ssh-text-deploy` 六个技能，说明安装成功。
+输出列表中应出现 `ngspice`、`ltspice`、`spectre`、`gmoverid`、`transistor-models`、`sky130-pdk` 和 `ssh-text-deploy` 七个技能，说明安装成功。
 
 > 如果你是 Agent，以上安装步骤由你代为执行，根据用户需求选择全局或项目级安装路径，无需用户手动操作。
 
 ## 环境要求
 
 - [ngspice](http://ngspice.sourceforge.net/)（系统全局安装）
+- 使用可选 Windows `ltspice` 工作流时，需要 [LTspice](https://www.analog.com/ltspice)
 - 使用可选 `spectre` 工作流时，需要 Cadence Spectre 和有效许可证
 - 在 Windows 上使用可选 `ssh-text-deploy` 辅助时，需要 PowerShell 7+
 - Python 3，依赖：`numpy`、`matplotlib`、`scipy`；Sky130A PDK 安装推荐使用 `volare`

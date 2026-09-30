@@ -1,0 +1,15 @@
+* PTM PMOS gm/ID characterization with LTspice
+* model={model_key} W={w_um}um L={l_um}um |VSD|={vds_v}V
+.include "{model_path}"
+
+Vdd vdd 0 {vdd_v}
+Vgate gate 0 {vdd_v}
+Vdrain drain 0 {vd_v}
+M1 drain gate vdd vdd {model_name} W={w_um}u L={l_um}u
+
+.options reltol=1e-6 vntol=1e-9 abstol=1e-12 plotwinsize=0
+.temp 27
+.dc Vgate {vdd_v} 0 -{vgs_step}
+.save V(gate) I(Vdrain)
+.end
+

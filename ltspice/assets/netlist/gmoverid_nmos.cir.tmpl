@@ -1,0 +1,13 @@
+* PTM NMOS gm/ID characterization with LTspice
+* model={model_key} W={w_um}um L={l_um}um VDS={vds_v}V
+.include "{model_path}"
+
+Vgs vgs 0 0
+Vds vds 0 {vds_v}
+M1 vds vgs 0 0 {model_name} W={w_um}u L={l_um}u
+
+.options reltol=1e-6 vntol=1e-9 abstol=1e-12 plotwinsize=0
+.temp 27
+.dc Vgs 0 {vgs_stop} {vgs_step}
+.save V(vgs) I(Vds)
+.end

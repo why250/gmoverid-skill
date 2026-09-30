@@ -1,6 +1,6 @@
 ---
 name: gmoverid
-description: "Characterize MOSFETs and size transistors with the gm/ID methodology. Use for curve/table generation from built-in PTM models with ngspice, installed foundry PDKs with Spectre, gm/ID plot interpretation, or lookup-table-based NMOS/PMOS sizing."
+description: "Characterize MOSFETs and size transistors with the gm/ID methodology. Use for curve/table generation from built-in PTM models or ngspice-compatible foundry PDKs, normalized PTM tables produced by the LTspice skill, installed foundry PDKs with Spectre, interactive multi-dimensional LUT exploration, gm/ID plot interpretation, or lookup-table-based NMOS/PMOS sizing."
 ---
 
 # gm/ID Characterization and Design Skill
@@ -8,13 +8,22 @@ description: "Characterize MOSFETs and size transistors with the gm/ID methodolo
 > **Important — do not modify skill files during normal use.**
 > All code edits, new scripts, plots, and simulation outputs should go into the user's **project working directory** (outside `.claude/`), not into this skill folder. Only modify the skill assets (`assets/`, `SKILL.md`, `references/`) when the user explicitly asks to improve or extend the skill itself.
 
-**Dependencies by route**: the built-in PTM route uses the `ngspice` skill. An
-installed foundry PDK supported by Cadence Spectre uses the `spectre` skill.
+**Dependencies by route**: the built-in PTM and explicitly ngspice-compatible
+foundry routes use the `ngspice` skill. An installed foundry PDK supported by
+Cadence Spectre uses the `spectre` skill. The independent Windows `ltspice`
+skill can generate normalized PTM gm/ID tables for import into this workflow.
 
 ## Workflow Routing
 
 - For the built-in PTM 180/45/22 nm models or a standalone SPICE `.lib`, use
   Workflow 1 below.
+- For LTspice batch simulation of the same bundled PTM nodes, use the
+  `ltspice` skill, then consume its normalized table here for plotting or
+  sizing; keep LTspice RAW parsing out of this ngspice engine.
+- For an installed foundry PDK that explicitly provides ngspice-compatible
+  models, keep the model in place and characterize the wrapper's internal
+  compact device. For multi-dimensional tables or an interactive explorer,
+  read [references/multidimensional-characterization.md](references/multidimensional-characterization.md).
 - For a user-authorized installed foundry PDK with Spectre, use the `spectre`
   skill for model/corner discovery, simulation, and PSF extraction, then return
   the normalized device table to this skill for gm/ID plots and sizing.
@@ -83,8 +92,31 @@ All paths resolve automatically via `Path(__file__).resolve().parent` — no pat
 3. Add an entry to `NODE_CFG` in `run_multinode.py`
 
 This three-step route is for standalone SPICE model cards. For an installed
-foundry PDK, do not flatten or copy its models; use the Spectre workflow linked
-under Workflow Routing.
+foundry PDK, do not flatten or copy its models. Use either its explicitly
+supported ngspice route or the Spectre workflow linked under Workflow Routing.
+
+### Installed ngspice-compatible foundry PDKs
+
+Treat the PDK as an external, versioned dependency: record its version, include
+its library in place, and never copy or rewrite model cards into the project.
+Foundry devices may be subcircuit wrappers, so extract `gm`, `gds`, charge
+capacitances, threshold, and saturation voltage from the internal compact-model
+instance rather than assuming `@xwrapper[param]` exists.
+
+For a reusable design database:
+
+- keep the raw VGS sweep table as the source of truth;
+- separate the nominal `L × VDS × VBS` design sweep from the nominal-geometry
+  `corner × temperature` sweep unless a full Cartesian database is requested;
+- use only the post-peak inversion branch when gm/ID is the lookup axis and do
+  not extrapolate unavailable targets;
+- emit explicit metadata, units, condition/profile columns, and availability;
+- retain static plots for reports, and add a static interactive explorer when
+  users need repeated filtering, comparison, and operating-point inspection.
+
+The full schema, interpolation rules, interactive presentation contract, and
+acceptance checks are maintained in
+[references/multidimensional-characterization.md](references/multidimensional-characterization.md).
 
 ---
 

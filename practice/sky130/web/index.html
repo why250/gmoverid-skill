@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Interactive gm/ID explorer for the Sky130A NFET characterization table">
+  <title>Sky130 MOS Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#workspace">跳到图表</a>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">SKY130A · GM/ID CHARACTERIZATION</p>
+      <h1>MOS Explorer</h1>
+      <p class="subtitle">交互查看偏置、沟道长度与 PVT 对器件性能的影响</p>
+    </div>
+    <div class="header-meta" aria-label="数据集摘要">
+      <span id="dataset-status" class="status-badge" role="status">正在载入数据…</span>
+      <span id="dataset-count" class="dataset-count"></span>
+    </div>
+  </header>
+
+  <nav class="mode-tabs" role="tablist" aria-label="查看模式">
+    <button id="tab-explore" class="mode-tab is-active" type="button" role="tab"
+            aria-selected="true" aria-controls="panel-explore">Explore</button>
+    <button id="tab-compare" class="mode-tab" type="button" role="tab"
+            aria-selected="false" aria-controls="panel-compare">Compare</button>
+  </nav>
+
+  <main id="workspace" class="workspace" aria-busy="true">
+    <aside class="control-panel" aria-label="仿真条件">
+      <section id="panel-explore" role="tabpanel" aria-labelledby="tab-explore">
+        <div class="section-heading">
+          <h2>工作条件</h2>
+          <button id="reset-explore" class="text-button" type="button">恢复标称值</button>
+        </div>
+        <div class="filter-grid">
+          <label class="field">
+            <span>Process corner</span>
+            <select id="filter-corner"></select>
+          </label>
+          <label class="field">
+            <span>Temperature</span>
+            <select id="filter-temperature"></select>
+          </label>
+          <label class="field">
+            <span>Channel length</span>
+            <select id="filter-length"></select>
+          </label>
+          <label class="field">
+            <span>VDS</span>
+            <select id="filter-vds"></select>
+          </label>
+          <label class="field">
+            <span>VBS</span>
+            <select id="filter-vbs"></select>
+          </label>
+        </div>
+        <p id="explore-profile-note" class="context-note"></p>
+      </section>
+
+      <section id="panel-compare" role="tabpanel" aria-labelledby="tab-compare" hidden>
+        <div class="section-heading">
+          <h2>比较设置</h2>
+          <button id="reset-compare" class="text-button" type="button">恢复默认</button>
+        </div>
+        <label class="field">
+          <span>Compare dimension</span>
+          <select id="compare-dimension">
+            <option value="length_um">Channel length</option>
+            <option value="vds_v">VDS</option>
+            <option value="vbs_v">VBS</option>
+            <option value="corner">Process corner</option>
+            <option value="temperature_c">Temperature</option>
+          </select>
+        </label>
+        <div id="compare-fixed" class="fixed-condition" aria-live="polite"></div>
+        <fieldset class="series-picker">
+          <legend>Visible series</legend>
+          <div id="series-options"></div>
+        </fieldset>
+      </section>
+
+      <section class="cursor-control" aria-labelledby="cursor-title">
+        <div class="cursor-label-row">
+          <h2 id="cursor-title">设计游标</h2>
+          <output id="gmid-output" for="gmid-slider gmid-input">15.0 V⁻¹</output>
+        </div>
+        <input id="gmid-slider" type="range" min="4" max="24" step="0.1" value="15"
+               aria-label="gm over ID design cursor">
+        <label class="field compact-field" for="gmid-input">
+          <span>精确输入 gm/ID</span>
+          <span class="input-with-unit">
+            <input id="gmid-input" type="number" min="4" max="24" step="0.1" value="15">
+            <span>V⁻¹</span>
+          </span>
+        </label>
+      </section>
+
+      <section class="actions" aria-label="数据操作">
+        <button id="copy-point" class="primary-button" type="button">复制当前工作点</button>
+        <button id="download-slice" class="secondary-button" type="button">下载当前曲线 TSV</button>
+        <p id="action-status" class="action-status" role="status" aria-live="polite"></p>
+      </section>
+    </aside>
+
+    <section class="content-area" aria-label="MOS 特性图表">
+      <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+      <section class="selection-summary" aria-labelledby="selection-title">
+        <div>
+          <p class="eyebrow">ACTIVE SELECTION</p>
+          <h2 id="selection-title">sky130_fd_pr__nfet_01v8</h2>
+        </div>
+        <p id="selection-description" class="selection-description"></p>
+      </section>
+
+      <div class="chart-grid">
+        <article class="chart-panel">
+          <div class="chart-heading">
+            <div><h3>I<sub>D</sub>/W</h3><p>电流密度 · 对数坐标</p></div>
+            <span id="value-idw" class="live-value"></span>
+          </div>
+          <svg id="chart-idw" class="chart" role="img" aria-label="ID per width versus gm over ID"></svg>
+        </article>
+        <article class="chart-panel">
+          <div class="chart-heading">
+            <div><h3>g<sub>m</sub>/g<sub>ds</sub></h3><p>本征增益</p></div>
+            <span id="value-gmro" class="live-value"></span>
+          </div>
+          <svg id="chart-gmro" class="chart" role="img" aria-label="Intrinsic gain versus gm over ID"></svg>
+        </article>
+        <article class="chart-panel">
+          <div class="chart-heading">
+            <div><h3>f<sub>T</sub></h3><p>单位增益频率</p></div>
+            <span id="value-ft" class="live-value"></span>
+          </div>
+          <svg id="chart-ft" class="chart" role="img" aria-label="Transit frequency versus gm over ID"></svg>
+        </article>
+        <article class="chart-panel">
+          <div class="chart-heading">
+            <div><h3>V<sub>GS</sub></h3><p>所需栅源偏置</p></div>
+            <span id="value-vgs" class="live-value"></span>
+          </div>
+          <svg id="chart-vgs" class="chart" role="img" aria-label="Gate voltage versus gm over ID"></svg>
+        </article>
+      </div>
+
+      <section class="operating-point" aria-labelledby="op-title">
+        <div class="op-heading">
+          <div>
+            <p class="eyebrow">INTERPOLATED OPERATING POINT</p>
+            <h2 id="op-title">工作点详情</h2>
+          </div>
+          <span id="availability" class="availability"></span>
+        </div>
+        <div id="op-primary" class="metric-grid"></div>
+        <div class="table-wrap">
+          <table id="op-table">
+            <caption class="sr-only">当前 gm/ID 游标下的器件参数</caption>
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer>
+    <p>数据来自 Sky130A continuous ngspice model · gm/ID 表使用反型区下降分支插值</p>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

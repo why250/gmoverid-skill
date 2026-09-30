@@ -20,3 +20,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Sky130A PVT/MC smoke test failed' }
 python (Join-Path $PSScriptRoot 'gmoverid_sky130.py') `
     --pdk-root $PdkRoot --ngspice $ngspice
 if ($LASTEXITCODE -ne 0) { throw 'Sky130A gm/ID characterization failed' }
+
+python (Join-Path $PSScriptRoot 'mos_characterization_sky130.py') `
+    --pdk-root $PdkRoot --ngspice $ngspice
+if ($LASTEXITCODE -ne 0) { throw 'Sky130A multi-dimensional MOS characterization failed' }

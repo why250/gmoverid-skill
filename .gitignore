@@ -26,6 +26,13 @@ practice/sky130/data/
 practice/sky130/smoke/
 practice/sky130/probe_internal.dat
 
+# GF180MCU BJT downloaded model and generated characterization tables
+practice/gf180/models/
+practice/gf180/data/
+
+# LTspice practice outputs
+practice/ltspice/results*/
+
 # Proprietary-PDK derived results copied from authorized remote servers
 practice/tsmc40_spectre/backup/
 
